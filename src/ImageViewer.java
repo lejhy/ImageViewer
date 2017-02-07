@@ -1,14 +1,14 @@
 import java.awt.*;
 import java.awt.event.*;
-import java.awt.image.*;
 import javax.swing.*;
 import javax.swing.border.*;
-
+import javax.swing.undo.AbstractUndoableEdit;
+import javax.swing.undo.CannotRedoException;
+import javax.swing.undo.CannotUndoException;
+import javax.swing.undo.UndoManager;
 import java.io.File;
-
 import java.util.List;
 import java.util.ArrayList;
-import java.util.Iterator;
 
 /**
  * ImageViewer is the main class of the image viewer application. It builds and
@@ -33,7 +33,8 @@ public class ImageViewer
     private JButton smallerButton;
     private JButton largerButton;
     private OFImage currentImage;
-    
+    private UndoManager undoManager;
+
     private List<Filter> filters;
     
     /**
@@ -44,8 +45,9 @@ public class ImageViewer
         currentImage = null;
         filters = createFilters();
         makeFrame();
+        undoManager = new UndoManager();
+        
     }
-
 
     // ---- implementation of menu functions ----
     
@@ -123,6 +125,8 @@ public class ImageViewer
     private void applyFilter(Filter filter)
     {
         if(currentImage != null) {
+        	FilterEdit edit = new FilterEdit(currentImage, filter);
+        	undoManager.addEdit(edit);
             filter.apply(currentImage);
             frame.repaint();
             showStatus("Applied: " + filter.getName());
@@ -130,6 +134,66 @@ public class ImageViewer
         else {
             showStatus("No image loaded.");
         }
+    }
+    
+    private class FilterEdit extends AbstractUndoableEdit{
+    	private OFImage backupImage;
+    	private Filter backupFilter;
+    	private FilterEdit (OFImage image, Filter filter){
+    		backupImage = new OFImage(image);
+    		backupFilter = filter;
+    	}
+    	public void undo()throws CannotUndoException {
+    		showStatus("undo");
+    		currentImage = new OFImage(backupImage);
+            imagePanel.setImage(currentImage);
+            frame.repaint();	
+    	}
+    	public void redo()throws CannotRedoException{
+    		showStatus("redo");   
+    		backupFilter.apply(currentImage);
+            frame.repaint();
+    	}
+    	public boolean canUndo(){return true;}
+    	public boolean canRedo(){return true;}
+    }
+    
+    private class SmallerEdit extends AbstractUndoableEdit{
+    	private OFImage backupImage;
+    	private SmallerEdit (OFImage image){
+    		backupImage = new OFImage(image);
+    	}
+    	public void undo() {
+    		showStatus("undo");
+    		currentImage = new OFImage(backupImage);
+            imagePanel.setImage(currentImage);
+            frame.pack();
+		}
+    	public void redo()throws CannotRedoException{
+    		showStatus("redo");   
+    		makeSmaller();
+    	}
+    	public boolean canUndo(){return true;}
+    	public boolean canRedo(){return true;}
+    }
+    
+    private class LargerEdit extends AbstractUndoableEdit{
+    	private OFImage backupImage;
+    	private LargerEdit (OFImage image){
+    		backupImage = new OFImage(image);
+    	}
+    	public void undo() {
+    		showStatus("undo");
+    		currentImage = new OFImage(backupImage);
+            imagePanel.setImage(currentImage);
+            frame.pack();
+		}
+    	public void redo()throws CannotRedoException{
+    		showStatus("redo");   
+    		makeLarger();
+    	}
+    	public boolean canUndo(){return true;}
+    	public boolean canRedo(){return true;}
     }
 
     /**
@@ -149,6 +213,8 @@ public class ImageViewer
     private void makeLarger()
     {
         if(currentImage != null) {
+        	LargerEdit edit = new LargerEdit(currentImage);
+        	undoManager.addEdit(edit);
             // create new image with double size
             int width = currentImage.getWidth();
             int height = currentImage.getHeight();
@@ -178,6 +244,8 @@ public class ImageViewer
     private void makeSmaller()
     {
         if(currentImage != null) {
+        	SmallerEdit edit = new SmallerEdit(currentImage);
+        	undoManager.addEdit(edit);
             // create new image with double size
             int width = currentImage.getWidth() / 2;
             int height = currentImage.getHeight() / 2;
@@ -186,7 +254,12 @@ public class ImageViewer
             // copy pixel data into new image
             for(int y = 0; y < height; y++) {
                 for(int x = 0; x < width; x++) {
-                    newImage.setPixel(x, y, currentImage.getPixel(x * 2, y * 2));
+                	
+                    newImage.setPixel(x, y, new Color(
+                    		(currentImage.getPixel(x * 2, y * 2).getRed() + currentImage.getPixel(x * 2 + 1, y * 2).getRed() + currentImage.getPixel(x * 2, y * 2 + 1).getRed() + currentImage.getPixel(x * 2 + 1, y * 2 + 1).getRed())/4,
+                    		(currentImage.getPixel(x * 2, y * 2).getGreen() + currentImage.getPixel(x * 2 + 1, y * 2).getGreen() + currentImage.getPixel(x * 2, y * 2 + 1).getGreen() + currentImage.getPixel(x * 2 + 1, y * 2 + 1).getGreen())/4,
+                    		(currentImage.getPixel(x * 2, y * 2).getBlue() + currentImage.getPixel(x * 2 + 1, y * 2).getBlue() + currentImage.getPixel(x * 2, y * 2 + 1).getBlue() + currentImage.getPixel(x * 2 + 1, y * 2 + 1).getBlue())/4
+                    		));
                 }
             }
             
@@ -194,6 +267,151 @@ public class ImageViewer
             imagePanel.setImage(currentImage);
             frame.pack();
         }
+    }
+    
+    private class CropEdit extends AbstractUndoableEdit{
+    	private OFImage backupImage;
+    	private int left;
+    	private int right;
+    	private int bottom;
+    	private int top;
+    	private CropEdit (OFImage image, int l, int r, int b, int t){
+    		backupImage = new OFImage(image);
+    		left = l;
+    		right = r;
+    		bottom = b;
+    		top = t;
+    		
+    	}
+    	public void undo()throws CannotRedoException{
+    		showStatus("undo");
+    		currentImage = new OFImage(backupImage);
+            imagePanel.setImage(currentImage);
+            frame.pack();
+		}
+    	public void redo()throws CannotRedoException{
+    		showStatus("redo");   
+    		crop(left, right, bottom, top);
+    	}
+    	public boolean canUndo(){return true;}
+    	public boolean canRedo(){return true;}
+    }
+    
+    public void crop(int l, int r, int b, int t) {
+    	if(currentImage != null){
+    		CropEdit edit = new CropEdit(currentImage, l, r, b, t);
+    		undoManager.addEdit(edit);
+    		// crop the image
+	    	int width = currentImage.getWidth() - l - r;
+	    	int height = currentImage.getHeight() - t - b;
+			OFImage newImage = new OFImage(width, height);
+			for (int y = 0; y < height; y++){
+				for (int x = 0; x < width; x++){
+					newImage.setPixel(x, y, currentImage.getPixel(x+l, y+t));
+				}
+			}
+		
+			currentImage = newImage;
+			imagePanel.setImage(currentImage);
+			frame.pack();
+    	}
+	}
+    
+    public class CropWindow extends JDialog{
+    	JPanel panel = new JPanel(new GridBagLayout());
+    	JLabel leftLabel = new JLabel("Left");
+    	JLabel rightLabel = new JLabel("Right");
+    	JLabel botomLabel = new JLabel("Bottom");
+    	JLabel topLabel = new JLabel("Top");
+    	JTextField left = new JTextField("0", 4);
+    	JTextField right = new JTextField("0", 4);
+    	JTextField bottom = new JTextField("0", 4);
+    	JTextField top = new JTextField("0", 4);
+    	JButton proceed = new JButton("Proceed");
+
+    	public CropWindow(){
+    		super(frame, "Crop", true);
+    		if (currentImage == null) dispose();
+    		setSize(250, 120);
+    		setResizable(false);
+    		crop(0, 0, 0, 0);
+    		setDefaultCloseOperation(DO_NOTHING_ON_CLOSE);
+    		addWindowListener(new java.awt.event.WindowAdapter() {
+    		    public void windowClosing(java.awt.event.WindowEvent windowEvent) {
+    		        try {
+    		        	undoManager.undo();
+    		        	dispose();
+    		        } catch (CannotUndoException e) {
+    		        	dispose();
+    		        }
+    		    }
+    		});
+    		proceed.addActionListener(new ActionListener() {
+    			public void actionPerformed(ActionEvent evt) {
+    				try {
+    					undoManager.undo();
+        				crop(Integer.parseInt(left.getText()), Integer.parseInt(right.getText()), Integer.parseInt(bottom.getText()), Integer.parseInt(top.getText()));	
+        				dispose();
+    		        } catch (CannotUndoException e) {
+    		        	dispose();
+    		        }
+    			}
+    		});
+    		left.addActionListener(new ActionListener() {
+    			public void actionPerformed(ActionEvent e) {
+    				undoManager.undo();
+    				crop(Integer.parseInt(left.getText()), Integer.parseInt(right.getText()), Integer.parseInt(bottom.getText()), Integer.parseInt(top.getText()));			
+    			}
+    		});
+    		right.addActionListener(new ActionListener() {
+    			public void actionPerformed(ActionEvent e) {
+    				undoManager.undo();
+    				crop(Integer.parseInt(left.getText()), Integer.parseInt(right.getText()), Integer.parseInt(bottom.getText()), Integer.parseInt(top.getText()));			
+    			}
+    		});
+    		bottom.addActionListener(new ActionListener() {
+    			public void actionPerformed(ActionEvent e) {
+    				undoManager.undo();
+    				crop(Integer.parseInt(left.getText()), Integer.parseInt(right.getText()), Integer.parseInt(bottom.getText()), Integer.parseInt(top.getText()));			
+    			}
+    		});
+    		top.addActionListener(new ActionListener() {
+    			public void actionPerformed(ActionEvent e) {
+    				undoManager.undo();
+    				crop(Integer.parseInt(left.getText()), Integer.parseInt(right.getText()), Integer.parseInt(bottom.getText()), Integer.parseInt(top.getText()));			
+    			}
+    		});
+    		
+    		GridBagConstraints c = new GridBagConstraints();
+    		c.insets = new Insets(2, 3, 2, 3);
+    		c.gridy = 0;
+    		c.gridx = 0;
+    		panel.add(leftLabel, c);
+    		c.gridx = 1;
+    		panel.add(rightLabel, c);
+    		c.gridx = 2;
+    		panel.add(botomLabel, c);
+    		c.gridx = 3;
+    		panel.add(topLabel, c);
+    		c.gridy = 1;
+    		c.gridx = 0;
+    		panel.add(left, c);
+    		c.gridx = 1;
+    		panel.add(right, c);
+    		c.gridx = 2;
+    		panel.add(bottom, c);
+    		c.gridx = 3;
+    		panel.add(top, c);
+    		c.gridy = 2;
+    		c.gridx = 1;
+    		c.gridwidth = 2;
+    		panel.add(proceed, c);
+    		
+    		add(panel);
+    		
+    		setVisible(true);
+    		
+    	}
     }
     
     // ---- support methods ----
@@ -368,6 +586,33 @@ public class ImageViewer
             item.addActionListener(new ActionListener() {
                                public void actionPerformed(ActionEvent e) { quit(); }
                            });
+        menu.add(item);
+        
+        // create the Edit menu
+        menu = new JMenu("Edit");
+        menubar.add(menu);
+        item = new JMenuItem("Undo");
+        	item.addActionListener(new ActionListener() {
+        						public void actionPerformed(ActionEvent e) {
+        							undoManager.undo();		
+        						}
+							});
+        menu.add(item);
+        item = new JMenuItem("Redo");
+        	item.addActionListener(new ActionListener() {
+        						public void actionPerformed(ActionEvent e) {
+        							undoManager.redo();				
+        						}
+							});
+        menu.add(item);
+        menu.addSeparator();
+        
+        item = new JMenuItem("Crop");
+        	item.addActionListener(new ActionListener() {
+        						public void actionPerformed(ActionEvent e) {
+        							new CropWindow();		
+        						}
+							});
         menu.add(item);
 
 
